@@ -1,0 +1,584 @@
+---
+title: Windows 安装程序
+sidebar:
+  order: 1
+i18nReady: true
+---
+
+import CommandTabs from '@components/CommandTabs.astro';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Tauri 应用程序在 Windows 上可以通过 [WiX Toolset v3] 生成 Microsoft 安装程序（`.msi` 文件），或使用 [NSIS] 生成安装可执行文件（`-setup.exe` 文件）。
+
+请注意，`.msi` 安装程序**只能在 Windows 上创建**，因为跨平台编译不可行。NSIS 安装程序的跨平台编译目前处于实验阶段。
+
+本指南提供有关安装程序可用自定义选项的信息。
+
+## 构建
+
+要在 Windows 计算机上构建应用程序并打包成 Windows 安装程序，可以使用 Tauri CLI 运行 `tauri build` 命令：
+
+<CommandTabs
+  npm="npm run tauri build"
+  yarn="yarn tauri build"
+  pnpm="pnpm tauri build"
+  deno="deno task tauri build"
+  bun="bun tauri build"
+  cargo="cargo tauri build"
+/>
+
+### 实验性：在 Linux 和 macOS 上构建 Windows 应用
+
+使用 [NSIS] 时，可以在 Linux 和 macOS 主机上交叉编译 Windows 应用。请注意，目前这被视为高度实验性功能，可能无法在所有系统或项目中正常工作。因此，仅建议在本地虚拟机或 GitHub Actions 等 CI 解决方案不可用时使用。
+
+:::note
+交叉编译的 Windows 安装程序签名需要外部签名工具。详见[签名文档](/distribute/sign/windows/)。
+:::
+
+由于 Tauri 官方仅支持 MSVC Windows 目标，设置过程稍显复杂。
+
+#### 安装 NSIS
+
+<Tabs syncKey="OS">
+<TabItem label="Linux">
+部分 Linux 发行版的仓库中提供了 NSIS，例如在 Ubuntu 上可通过以下命令安装：
+
+```sh title=Ubuntu
+sudo apt install nsis
+```
+
+但许多其他发行版需自行编译 NSIS 或手动下载 Stubs 和 Plugins（这些内容未包含在发行版的二进制包中）。例如 Fedora 仅提供二进制文件而未包含 Stubs 和 Plugins：
+
+```sh title=Fedora
+sudo dnf in mingw64-nsis
+wget https://github.com/tauri-apps/binary-releases/releases/download/nsis-3/nsis-3.zip
+unzip nsis-3.zip
+sudo cp nsis-3.08/Stubs/* /usr/share/nsis/Stubs/
+sudo cp -r nsis-3.08/Plugins/** /usr/share/nsis/Plugins/
+```
+
+</TabItem>
+
+<TabItem label="macOS">
+在 macOS 上需通过 [Homebrew] 安装 NSIS：
+
+```sh title=macOS
+brew install nsis
+```
+
+</TabItem>
+</Tabs>
+
+#### 安装 LLVM 和 LLD 链接器
+
+由于默认的 Microsoft 链接器仅适用于 Windows，因此需要安装新的链接器。为编译用于设置应用图标等功能的 Windows 资源文件，还需安装属于 LLVM 项目的 `llvm-rc` 二进制文件。
+
+<Tabs syncKey="OS">
+<TabItem label="Linux">
+  
+```sh title="Ubuntu"
+sudo apt install lld llvm
+```
+
+若添加的依赖项在构建脚本中编译 C/C++ 依赖项，还需安装 `clang` 包。默认 Tauri 应用无需此步骤。
+
+</TabItem>
+<TabItem label="macOS">
+```sh title=macOS
+brew install llvm
+```
+
+根据安装输出提示，需将 `/opt/homebrew/opt/llvm/bin` 添加至 `$PATH`。
+
+</TabItem>
+</Tabs>
+
+#### 安装 Windows Rust 目标
+
+假设构建 64 位 Windows 系统应用：
+
+```sh
+rustup target add x86_64-pc-windows-msvc
+```
+
+#### 安装 `cargo-xwin`
+
+我们将使用 [`cargo-xwin`] 作为 Tauri 的 "runner" 来替代手动设置 Windows SDK：
+
+```sh
+cargo install --locked cargo-xwin
+```
+
+默认 `cargo-xwin` 将 Windows SDK 下载至项目本地目录。若需在多项目间共享文件，可通过 `XWIN_CACHE_DIR` 环境变量指定路径。
+
+#### 构建应用
+
+现在只需在 `tauri build` 命令中添加 runner 和目标：
+
+<CommandTabs
+  npm="npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc"
+  yarn="yarn tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
+  pnpm="pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
+  deno="deno task tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
+  bun="bun tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
+  cargo="cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
+/>
+
+构建输出位于 `target/x86_64-pc-windows-msvc/release/bundle/nsis/`。
+
+### 构建 32 位或 ARM 版本
+
+Tauri CLI 默认根据机器架构编译可执行文件。假设开发机为 64 位，CLI 将生成 64 位应用。
+
+如需支持 **32 位** 机器，可使用不同的 [Rust 目标][platform support]，通过 `--target` 标志编译：
+
+<CommandTabs
+  npm="npm run tauri build -- --target i686-pc-windows-msvc"
+  yarn="yarn tauri build --target i686-pc-windows-msvc"
+  pnpm="pnpm tauri build --target i686-pc-windows-msvc"
+  deno="deno task tauri build --target i686-pc-windows-msvc"
+  bun="bun tauri build --target i686-pc-windows-msvc"
+  cargo="cargo tauri build --target i686-pc-windows-msvc"
+/>
+
+Rust 默认仅安装主机目标工具链，需先安装 32 位 Windows 工具链：`rustup target add i686-pc-windows-msvc`。
+
+如需构建 **ARM64** 版本，需先安装额外构建工具。打开 `Visual Studio Installer`，点击 "Modify"，在 "Individual Components" 标签页安装 "C++ ARM64 build tools"。截至撰写时，VS2022 中的确切名称为 `MSVC v143 - VS 2022 C++ ARM64 build tools (Latest)`。  
+随后通过 `rustup target add aarch64-pc-windows-msvc` 添加 Rust 目标，并使用前述方法编译应用：
+
+<CommandTabs
+  npm="npm run tauri build -- --target aarch64-pc-windows-msvc"
+  yarn="yarn tauri build --target aarch64-pc-windows-msvc"
+  pnpm="pnpm tauri build --target aarch64-pc-windows-msvc"
+  deno="deno task tauri build --target aarch64-pc-windows-msvc"
+  bun="bun tauri build --target aarch64-pc-windows-msvc"
+  cargo="cargo tauri build --target aarch64-pc-windows-msvc"
+/>
+
+:::info
+
+注意 NSIS 安装程序本身仍为 x86 架构，通过模拟在 ARM 机器上运行。应用本身为原生 ARM64 二进制文件。
+
+:::
+
+## 支持 Windows 7
+
+默认情况下，Microsoft 安装程序（`.msi`）在 Windows 7 上无法工作，因为若未安装 WebView2 引导程序需下载（若操作系统未启用 TLS 1.2 可能失败）。Tauri 提供嵌入 WebView2 引导程序的选项（见下文[嵌入 WebView2 引导程序](#embedded-bootstrapper)）。基于 NSIS 的安装程序（`-setup.exe`）在 Windows 7 上也支持 `downloadBootstrapper` 模式。
+
+此外，在 Windows 7 中使用通知 API 需启用 `windows7-compat` Cargo 功能：
+
+```toml title="Cargo.toml"
+[dependencies]
+tauri-plugin-notification = { version = "2.0.0", features = [ "windows7-compat" ] }
+```
+
+## FIPS 合规性
+
+若系统要求 MSI 包符合 FIPS 标准，可在运行 `tauri build` 前设置 `TAURI_FIPS_COMPLIANT` 环境变量为 `true`。在 PowerShell 中可为当前终端会话设置：
+
+```powershell
+$env:TAURI_FIPS_COMPLIANT="true"
+```
+
+## WebView2 安装选项
+
+安装程序默认下载并执行 WebView2 引导程序（若运行时未安装）。可选方案包括嵌入引导程序、嵌入离线安装程序或使用固定版本 WebView2 运行时。各方法对比见下表：
+
+| 安装方式                                | 需网络连接？ | 安装包增量 | 说明                                                                                                                   |
+| :-------------------------------------- | :----------- | :--------- | :-------------------------------------------------------------------------------------------------------------------- |
+| [`downloadBootstrapper`](#下载引导程序) | 是           | 0MB        | `默认` <br /> 安装包较小，但不建议通过 `.msi` 文件部署到 Windows 7。                                                   |
+| [`embedBootstrapper`](#嵌入引导程序)    | 是           | ~1.8MB     | 提升 `.msi` 安装程序在 Windows 7 上的兼容性。                                                                         |
+| [`offlineInstaller`](#离线安装程序)     | 否           | ~127MB     | 嵌入 WebView2 安装程序，推荐离线环境使用。                                                                            |
+| [`fixedVersion`](#固定版本)             | 否           | ~180MB     | 嵌入固定版本 WebView2。                                                                                               |
+| [`skip`](#跳过安装)                     | 否           | 0MB        | ⚠️ 不推荐 <br /> 不在 Windows 安装程序中安装 WebView2。                                                               |
+
+:::info
+
+Windows 10（2018 年 4 月更新及更高版本）和 Windows 11 中，WebView2 运行时随操作系统分发。
+
+:::
+
+### 下载引导程序
+
+此为 Windows 安装程序默认设置，下载并运行引导程序。需要网络连接但安装包较小。不建议通过 `.msi` 分发给 Windows 7 用户。
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  }
+}
+```
+
+### 嵌入引导程序
+
+通过设置 [webviewInstallMode] 为 `embedBootstrapper` 嵌入 WebView2 引导程序。安装包增加约 1.8MB，但提升对 Windows 7 系统的兼容性。
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
+  }
+}
+```
+
+### 离线安装程序
+
+设置 [webviewInstallMode] 为 `offlineInstaller` 嵌入 WebView2 离线安装程序。安装包增加约 127MB，但允许无网络连接时安装应用。
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    }
+  }
+}
+```
+
+### 固定版本
+
+系统提供的运行时有利于安全性，Webview 漏洞补丁由 Windows 管理。若需控制各应用的 WebView2 分发（自主管理版本或部署到可能无网络的环境），Tauri 可打包运行时文件。
+
+:::caution
+
+分发固定版本 WebView2 运行时将使 Windows 安装程序增加约 180MB。
+
+:::
+
+1. 从 [Microsoft 官网][download-webview2-runtime] 下载固定版本运行时。本例文件名为 `Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64.cab`
+2. 解压文件至核心目录：
+
+```powershell
+Expand .\Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64.cab -F:* ./src-tauri
+```
+
+3. 在 `tauri.conf.json` 中配置 WebView2 运行时路径：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "fixedRuntime",
+        "path": "./Microsoft.WebView2.FixedVersionRuntime.98.0.1108.50.x64/"
+      }
+    }
+  }
+}
+```
+
+4. 运行 `tauri build` 生成含固定版本 WebView2 的 Windows 安装程序。
+
+### 跳过安装
+
+设置 [webviewInstallMode] 为 `skip` 可跳过 WebView2 运行时安装检查。若用户未安装运行时，应用将无法运行。
+
+:::warning
+
+用户未安装运行时应用将无法运行，且不会尝试安装。
+
+:::
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      }
+    }
+  }
+}
+```
+
+## 自定义 WiX 安装程序
+
+完整自定义选项见 [WiX 配置]。
+
+### 安装程序模板
+
+`.msi` Windows 安装程序包使用 [WiX Toolset v3] 构建。除预定义的[配置][WiX 配置]外，可通过自定义 WiX 源代码（扩展名为 `.wxs` 的 XML 文件）或 WiX 片段进行修改。
+
+#### 使用自定义 WiX 文件替换安装代码
+
+Tauri 定义的 Windows Installer XML 适用于基于 webview 的简单应用常见用例（代码见[此处][default wix template]）。使用 [handlebars] 模板引擎，Tauri CLI 可根据 `tauri.conf.json` 定义定制安装程序。若需完全不同的安装程序，可通过 [`tauri.bundle.windows.wix.template`] 配置自定义模板文件。
+
+#### 使用 WiX 片段扩展安装程序
+
+[WiX 片段]是 WiX 提供的通用配置容器。以下示例定义写入两个注册表项的片段：
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- 这些注册表项应安装到目标用户的机器 -->
+    <DirectoryRef Id="TARGETDIR">
+      <!-- 将注册表项分组安装 -->
+      <!-- 注意此处提供的唯一 `Id` -->
+      <Component Id="MyFragmentRegistryEntries" Guid="*">
+        <!-- 注册表键位于 HKEY_CURRENT_USER\Software\MyCompany\MyApplicationName -->
+        <!-- Tauri 使用 bundle identifier 的第二部分作为 `MyCompany` 名称（如 `com.tauri-apps.test` 中的 `tauri-apps`） -->
+        <RegistryKey
+          Root="HKCU"
+          Key="Software\MyCompany\MyApplicationName"
+          Action="createAndRemoveOnUninstall"
+        >
+          <!-- 持久化到注册表的值 -->
+          <RegistryValue
+            Type="integer"
+            Name="SomeIntegerValue"
+            Value="1"
+            KeyPath="yes"
+          />
+          <RegistryValue Type="string" Value="Default Value" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
+```
+
+将片段文件保存为 `.wxs` 扩展名，置于 `src-tauri/windows/fragments` 目录，并在 `tauri.conf.json` 中引用：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "wix": {
+        "fragmentPaths": ["./windows/fragments/registry.wxs"],
+        "componentRefs": ["MyFragmentRegistryEntries"]
+      }
+    }
+  }
+}
+```
+
+注意 `ComponentGroup`、`Component`、`FeatureGroup`、`Feature` 和 `Merge` 元素的 id 需在 `tauri.conf.json` 的 `wix` 对象中通过 `componentGroupRefs`、`componentRefs`、`featureGroupRefs`、`featureRefs` 和 `mergeRefs` 分别引用，以包含在安装程序中。
+
+### 国际化
+
+WiX 安装程序默认使用 `en-US` 语言构建。国际化（i18n）可通过 [`tauri.bundle.windows.wix.language`] 属性配置，定义 Tauri 应构建安装程序的语言。语言名称参考 [Microsoft 官网][localizing the error and actiontext tables] 的 Language-Culture 列。
+
+#### 为单一语言编译 WiX 安装程序
+
+创建针对特定语言的安装程序，将 `language` 设为字符串：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "wix": {
+        "language": "fr-FR"
+      }
+    }
+  }
+}
+```
+
+#### 为多语言列表编译 WiX 安装程序
+
+通过数组配置多语言安装程序，将为每种语言生成特定安装程序，文件名附带语言代码：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "wix": {
+        "language": ["en-US", "pt-BR", "fr-FR"]
+      }
+    }
+  }
+}
+```
+
+#### 为各语言配置 WiX 安装程序字符串
+
+可为每种语言定义配置对象以设置本地化字符串：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "wix": {
+        "language": {
+          "en-US": null,
+          "pt-BR": {
+            "localePath": "./wix/locales/pt-BR.wxl"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`localePath` 属性定义语言文件路径，该 XML 配置语言文化：
+
+```xml
+<WixLocalization
+  Culture="en-US"
+  xmlns="http://schemas.microsoft.com/wix/2006/localization"
+>
+  <String Id="LaunchApp"> 启动 MyApplicationName </String>
+  <String Id="DowngradeErrorMessage">
+    已安装更新版本的 MyApplicationName。
+  </String>
+  <String Id="PathEnvVarFeature">
+    将 MyApplicationName 可执行文件的安装位置添加到 PATH 系统环境变量。允许从任意位置调用 MyApplicationName 可执行文件。
+  </String>
+  <String Id="InstallAppFeature">
+    安装 MyApplicationName。
+  </String>
+</WixLocalization>
+```
+
+:::note
+
+`WixLocalization` 元素的 `Culture` 字段必须与配置的语言匹配。
+
+:::
+
+当前 Tauri 引用以下本地化字符串：`LaunchApp`、`DowngradeErrorMessage`、`PathEnvVarFeature` 和 `InstallAppFeature`。可自定义字符串并通过 `"!(loc.TheStringId)"` 在模板或片段中引用。详见 [WiX 本地化文档]。
+
+## 自定义 NSIS 安装程序
+
+完整自定义选项见 [NSIS 配置]。
+
+### 安装程序模板
+
+NSIS 安装程序的 `.nsi` 脚本默认适用于基于 webview 的简单应用（代码见[此处][default nsis template]）。使用 [handlebars] 模板引擎，Tauri CLI 可根据 `tauri.conf.json` 定义定制安装程序。若需完全不同的安装程序，可通过 [`tauri.bundle.windows.nsis.template`] 配置自定义模板文件。
+
+### 扩展安装程序
+
+若只需扩展部分安装步骤，可使用安装程序钩子代替替换整个模板。
+
+支持的钩子包括：
+
+- `NSIS_HOOK_PREINSTALL`: 在复制文件、设置注册表项和创建快捷方式前运行。
+- `NSIS_HOOK_POSTINSTALL`: 在完成所有文件复制、注册表项设置和快捷方式创建后运行。
+- `NSIS_HOOK_PREUNINSTALL`: 在删除文件、注册表项和快捷方式前运行。
+- `NSIS_HOOK_POSTUNINSTALL`: 在删除文件、注册表项和快捷方式后运行。
+
+例如，在 `src-tauri/windows` 目录创建 `hooks.nsi` 文件并定义所需钩子：
+
+```nsh
+!macro NSIS_HOOK_PREINSTALL
+  MessageBox MB_OK "安装前"
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  MessageBox MB_OK "安装后"
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  MessageBox MB_OK "卸载前"
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  MessageBox MB_OK "卸载后"
+!macroend
+```
+
+随后在 Tauri 配置中使用该钩子文件：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsi"
+      }
+    }
+  }
+}
+```
+
+### 安装模式
+
+默认安装程序仅为当前用户安装应用。此选项的优势是安装程序无需管理员权限，但应用安装在 `%LOCALAPPDATA%` 而非 `C:/Program Files`。
+
+若希望应用系统级安装（需管理员权限），可将 [installMode] 设为 `perMachine`：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}
+```
+
+也可让用户选择为当前用户或系统安装，将 [installMode] 设为 `both`。注意安装程序需要管理员权限执行。
+
+详见 [NSISInstallerMode]。
+
+### 国际化
+
+NSIS 安装程序为多语言安装程序，单个安装程序包含所有选定语言的翻译。可通过 [`tauri.bundle.windows.nsis.languages`](/reference/config/#languages) 属性指定包含的语言。NSIS 支持的语言列表见 [NSIS GitHub 项目]。存在部分 [Tauri 特定翻译]，若发现未翻译文本，欢迎在 [Tauri 主仓库] 提交功能请求。也可提供[自定义翻译文件](/reference/config/#customlanguagefiles)。
+
+默认根据操作系统语言确定安装程序语言。也可配置安装程序在内容渲染前显示语言选择器：
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": true
+      }
+    }
+  }
+}
+```
+
+### 最低 Webview2 版本
+
+若应用需新版 Webview2 功能（如自定义 URI 方案），可配置 Windows 安装程序检查当前 Webview2 版本，若不匹配目标版本则运行引导程序。
+
+```json title="tauri.conf.json"
+{
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "minimumWebview2Version": "110.0.1531.0"
+      }
+    }
+  }
+}
+```
+
+[wix toolset v3]: https://wixtoolset.org/documentation/manual/v3/
+[nsis]: https://nsis.sourceforge.io/Main_Page
+[platform support]: https://doc.rust-lang.org/nightly/rustc/platform-support.html
+[webviewinstallmode]: /reference/config/#webviewinstallmode
+[download-webview2-runtime]: https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section
+[default wix template]: https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/msi/main.wxs
+[default nsis template]: https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
+[handlebars]: https://docs.rs/handlebars/latest/handlebars/
+[`tauri.bundle.windows.wix.template`]: /reference/config/#template-2
+[`tauri.bundle.windows.nsis.template`]: /reference/config/#template-1
+[wix fragment]: https://wixtoolset.org/documentation/manual/v3/xsd/wix/fragment.html
+[`tauri.bundle.windows.wix.language`]: /reference/config/#language
+[wix 本地化文档]: https://wixtoolset.org/documentation/manual/v3/howtos/ui_and_localization/make_installer_localizable.html
+[localizing the error and actiontext tables]: https://docs.microsoft.com/en-us/windows/win32/msi/localizing-the-error-and-actiontext-tables
+[the nsis github 项目]: https://github.com/kichik/nsis/tree/9465c08046f00ccb6eda985abbdbf52c275c6c4d/Contrib/Language%20files
+[tauri 特定翻译]: https://github.com/tauri-apps/tauri/tree/dev/crates/tauri-bundler/src/bundle/windows/nsis/languages
+[tauri 主仓库]: https://github.com/tauri-apps/tauri/issues/new?assignees=&labels=type%3A+feature+request&template=feature_request.yml&title=%5Bfeat%5D+
+[签名文档]: /distribute/sign/windows/
+[WiX 配置]: /reference/config/#wixconfig
+[NSIS 配置]: /reference/config/#nsisconfig
+[installMode]: /reference/config/#installmode
+[NSISInstallerMode]: /reference/config/#nsisinstallermode
